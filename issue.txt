@@ -1,0 +1,18 @@
+TITLE: [TECH-DEBT] Deep-Dive: Production Cluster Bottleneck & Embedding Retrieval Optimization
+
+DESCRIPTION: Context: Our current vector indexing strategy is showing extreme signs of degradation in the PROD environment. We are seeing a P99 latency spike hitting the 2-minute mark specifically when the boolean filtering logic (Strict-mode) is invoked.
+
+Observations:
+
+Environment Divergence: Non-production clusters (DEV/StriveYard) are operating within acceptable parameters.
+
+Functional Impact: This bottleneck is directly throttling the throughput of our LLM-based pipelines, specifically within the Knowledge-Transition and Service-Chat orchestration layers.
+
+Strategic Objective:
+Mitigate end-to-end latency to ensure seamless RAG (Retrieval-Augmented Generation) performance.
+
+Checklist for Closure:
+
+[ ] Complete a full audit of the vector store access patterns and indexing overhead.
+
+[ ] Either deploy hotfixes for the discovered bottleneck OR provide a detailed technical specification for a secondary sprint if the risk profile is too high.
