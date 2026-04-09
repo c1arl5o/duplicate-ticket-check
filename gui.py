@@ -9,6 +9,11 @@ from dotenv import load_dotenv, set_key
 from sentence_transformers import SentenceTransformer
 import duplicate
 
+
+DEFAULT_JIRA_URL = "https://strive.devops.t-systems.net/jira"
+DEFAULT_JIRA_PROJECT_KEY = "AIO"
+
+
 class JiraDuplicateGUI:
     def __init__(self, root):
         self.root = root
@@ -21,9 +26,9 @@ class JiraDuplicateGUI:
         load_dotenv(self.env_path)
 
         # Variables
-        self.jira_url = tk.StringVar(value=os.getenv("JIRA_URL", ""))
+        self.jira_url = tk.StringVar(value=os.getenv("JIRA_URL", DEFAULT_JIRA_URL))
         self.jira_token = tk.StringVar(value=os.getenv("JIRA_TOKEN", ""))
-        self.jira_project = tk.StringVar(value=os.getenv("JIRA_PROJECT_KEY", ""))
+        self.jira_project = tk.StringVar(value=os.getenv("JIRA_PROJECT_KEY", DEFAULT_JIRA_PROJECT_KEY))
         self.title_var = tk.StringVar()
         self.status_var = tk.StringVar(value="Ready")
         self.force_refresh_cache = tk.BooleanVar(value=False)
