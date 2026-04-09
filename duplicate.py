@@ -7,7 +7,7 @@ import sys
 from datetime import datetime, timezone
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 import numpy as np
 import requests
@@ -24,6 +24,8 @@ DEFAULT_TOP_K = 5
 DEFAULT_THRESHOLD = 0.55
 DEFAULT_BATCH_SIZE = 100
 DEFAULT_ISSUE_FILE = "issue.txt"
+
+ProgressCallback = Callable[[str, float | None], None]
 
 
 @dataclass
@@ -154,14 +156,21 @@ def call_jira_search(
 	raise RuntimeError("Jira search failed:\n" + "\n".join(errors))
 
 
-def fetch_issues(cfg: Config) -> list[dict[str, Any]]:
+def fetch_issues(
+	cfg: Config,
+	progress_callback: ProgressCallback | None = None,
+) -> list[dict[str, Any]]:
 	headers, auth = get_auth_headers_and_params(cfg.jira_token, cfg.jira_user)
 	jql = build_jql(cfg.jira_project_key)
 
 	fields = ["key", "summary", "description", "issuetype", "status", "updated"]
 	start_at = 0
 	total = None
+	fetched_count = 0
 	issues: list[dict[str, Any]] = []
+
+	if progress_callback:
+		progress_callback("fetch", 0.0)
 
 	while total is None or start_at < total:
 		payload = {
@@ -173,6 +182,10 @@ def fetch_issues(cfg: Config) -> list[dict[str, Any]]:
 		data = call_jira_search(cfg.jira_url, headers, auth, payload)
 		total = data.get("total", 0)
 		batch = data.get("issues", [])
+		fetched_count += len(batch)
+		if progress_callback and total:
+			pct = min(100.0, (fetched_count / total) * 100)
+			progress_callback("fetch", pct)
 
 		for issue in batch:
 			fields_data = issue.get("fields", {})
@@ -207,12 +220,46 @@ def fetch_issues(cfg: Config) -> list[dict[str, Any]]:
 		if not batch:
 			break
 
+	if progress_callback:
+		progress_callback("fetch", 100.0)
+
 	return issues
 
 
-def embed_texts(model: SentenceTransformer, texts: list[str]) -> np.ndarray:
-	vectors = model.encode(texts, convert_to_numpy=True, normalize_embeddings=True)
-	return vectors.astype(np.float32)
+def embed_texts(
+	model: SentenceTransformer,
+	texts: list[str],
+	batch_size: int | None = None,
+	progress_callback: ProgressCallback | None = None,
+	progress_stage: str = "embed",
+) -> np.ndarray:
+	if not texts:
+		return np.empty((0, 0), dtype=np.float32)
+
+	if not batch_size or len(texts) <= batch_size:
+		if progress_callback:
+			progress_callback(progress_stage, 0.0)
+		vectors = model.encode(texts, convert_to_numpy=True, normalize_embeddings=True)
+		if progress_callback:
+			progress_callback(progress_stage, 100.0)
+		return vectors.astype(np.float32)
+
+	chunks: list[np.ndarray] = []
+	total = len(texts)
+	processed = 0
+	if progress_callback:
+		progress_callback(progress_stage, 0.0)
+
+	for i in range(0, total, batch_size):
+		batch = texts[i : i + batch_size]
+		chunk = model.encode(batch, convert_to_numpy=True, normalize_embeddings=True)
+		chunks.append(chunk.astype(np.float32))
+		processed += len(batch)
+		if progress_callback:
+			pct = min(100.0, (processed / total) * 100)
+			progress_callback(progress_stage, pct)
+
+	return np.vstack(chunks)
 
 
 def load_cache() -> dict[str, Any] | None:
@@ -228,7 +275,11 @@ def save_cache(payload: dict[str, Any]) -> None:
 		pickle.dump(payload, f)
 
 
-def build_or_load_index(cfg: Config, model: SentenceTransformer) -> tuple[np.ndarray, list[dict[str, Any]]]:
+def build_or_load_index(
+	cfg: Config,
+	model: SentenceTransformer,
+	progress_callback: ProgressCallback | None = None,
+) -> tuple[np.ndarray, list[dict[str, Any]]]:
 	cache = load_cache()
 	if cache and not cfg.refresh_cache:
 		if (
@@ -240,14 +291,25 @@ def build_or_load_index(cfg: Config, model: SentenceTransformer) -> tuple[np.nda
 			vectors = cache.get("vectors")
 			metadata = cache.get("metadata")
 			if isinstance(vectors, np.ndarray) and isinstance(metadata, list) and len(metadata) == len(vectors):
+				if progress_callback:
+					progress_callback("cache_hit", 100.0)
 				return vectors, metadata
 
-	issues = fetch_issues(cfg)
+	if progress_callback:
+		progress_callback("cache_miss", None)
+
+	issues = fetch_issues(cfg, progress_callback=progress_callback)
 	if not issues:
 		raise RuntimeError("No Jira issues fetched for indexing. Check your JQL/project settings.")
 
 	texts = [item["text"] for item in issues]
-	vectors = embed_texts(model, texts)
+	vectors = embed_texts(
+		model,
+		texts,
+		batch_size=DEFAULT_BATCH_SIZE,
+		progress_callback=progress_callback,
+		progress_stage="embed",
+	)
 	fetched_at = datetime.now(timezone.utc).isoformat()
 
 	save_cache(

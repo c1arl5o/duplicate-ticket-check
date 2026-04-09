@@ -31,6 +31,9 @@ class JiraDuplicateGUI:
         self.include_done_issues = tk.BooleanVar(value=False)
         self.last_fetch_var = tk.StringVar(value="Last fetch: never")
         self._auto_forced_refresh = False
+        self._spinner_after_id = None
+        self._spinner_phase = 0
+        self._spinner_base_text = ""
         
         self.model = None
         self.vectors = None
@@ -89,42 +92,36 @@ class JiraDuplicateGUI:
 
         btn_frame.columnconfigure(1, weight=1)
 
-        controls_frame = ttk.Frame(btn_frame)
-        controls_frame.grid(row=0, column=0, sticky=tk.NW)
-
-        helper_frame = ttk.Frame(btn_frame)
-        helper_frame.grid(row=0, column=1, sticky=tk.NW, padx=(12, 0))
-
         self.force_refresh_check = ttk.Checkbutton(
-            controls_frame,
+            btn_frame,
             text="Force refresh cache",
             variable=self.force_refresh_cache
         )
-        self.force_refresh_check.pack(anchor=tk.W, pady=(0, 4))
+        self.force_refresh_check.grid(row=0, column=0, sticky=tk.W, pady=(0, 4))
 
         ttk.Checkbutton(
-            controls_frame,
+            btn_frame,
             text="Include closed (done) issues in results",
             variable=self.include_done_issues
-        ).pack(anchor=tk.W, pady=(0, 6))
+        ).grid(row=1, column=0, sticky=tk.W, pady=(0, 6))
 
-        self.check_btn = ttk.Button(controls_frame, text="Check for Duplicates", command=self._start_check)
-        self.check_btn.pack(anchor=tk.W)
+        self.check_btn = ttk.Button(btn_frame, text="Check for Duplicates", command=self._start_check)
+        self.check_btn.grid(row=2, column=0, sticky=tk.W)
 
         ttk.Label(
-            helper_frame,
-            text="Warning: Fetching can take some time.",
+            btn_frame,
+            text="Warning: This will remove the cached index\nand force a complete refresh on next search,\nwhich may take significantly longer.",
             foreground="#b45309"
-        ).pack(anchor=tk.W)
+        ).grid(row=0, column=1, sticky=tk.W, padx=(12, 0))
 
         ttk.Label(
-            helper_frame,
+            btn_frame,
             text="Done issues are always fetched for consistency.\nThis toggle only filters the displayed results.",
             foreground="#475569"
-        ).pack(anchor=tk.W, pady=(4, 0))
+        ).grid(row=1, column=1, sticky=tk.W, padx=(12, 0))
         
         ttk.Label(btn_frame, textvariable=self.status_var, font=("TkDefaultFont", 9, "italic")).grid(
-            row=1,
+            row=3,
             column=0,
             columnspan=2,
             sticky=tk.W,
@@ -183,7 +180,7 @@ class JiraDuplicateGUI:
 
         # Disable button and show loading
         self.check_btn.state(['disabled'])
-        self.status_var.set("Loading model and fetching issues...")
+        self._set_status("Starting duplicate check...")
         
         # Clear previous results
         for widget in self.results_scrollable_frame.winfo_children():
@@ -208,6 +205,54 @@ class JiraDuplicateGUI:
             timestamp = duplicate.get_cache_last_fetch()
         self.last_fetch_var.set(self._format_fetch_timestamp(timestamp))
 
+    def _set_status(self, text: str):
+        self.status_var.set(text)
+
+    def _spinner_tick(self):
+        dots = "." * (self._spinner_phase % 4)
+        self.status_var.set(f"{self._spinner_base_text}{dots}")
+        self._spinner_phase += 1
+        self._spinner_after_id = self.root.after(350, self._spinner_tick)
+
+    def _start_spinner(self, base_text: str):
+        self._stop_spinner()
+        self._spinner_base_text = base_text
+        self._spinner_phase = 0
+        self._spinner_tick()
+
+    def _stop_spinner(self):
+        if self._spinner_after_id is not None:
+            self.root.after_cancel(self._spinner_after_id)
+            self._spinner_after_id = None
+
+    def _handle_backend_progress(self, stage: str, percent: float | None):
+        # Any determinate update should stop spinner-based animation.
+        self._stop_spinner()
+
+        if stage == "cache_hit":
+            self._set_status("Using cached index (100%)")
+            return
+
+        if stage == "cache_miss":
+            self._set_status("Cache missing or stale, rebuilding index...")
+            return
+
+        if stage == "fetch":
+            if percent is None:
+                self._set_status("Fetching Jira issues...")
+            else:
+                self._set_status(f"Fetching Jira issues... {int(round(percent))}%")
+            return
+
+        if stage == "embed":
+            if percent is None:
+                self._set_status("Building semantic index...")
+            else:
+                self._set_status(f"Building semantic index... {int(round(percent))}%")
+            return
+
+        self._set_status("Processing...")
+
     def _sync_force_refresh_state(self):
         cache_exists = duplicate.CACHE_FILE.exists()
 
@@ -223,6 +268,9 @@ class JiraDuplicateGUI:
 
     def _perform_check(self, title, description):
         try:
+            def progress_callback(stage: str, percent: float | None):
+                self.root.after(0, lambda s=stage, p=percent: self._handle_backend_progress(s, p))
+
             cfg = duplicate.Config(
                 jira_url=self.jira_url.get(),
                 jira_token=self.jira_token.get(),
@@ -240,16 +288,21 @@ class JiraDuplicateGUI:
             )
 
             if self.model is None:
-                self.root.after(0, lambda: self.status_var.set("Initializing AI model..."))
+                self.root.after(0, lambda: self._start_spinner("Initializing AI model"))
                 self.model = SentenceTransformer(cfg.model_name)
+                self.root.after(0, self._stop_spinner)
             
-            self.root.after(0, lambda: self.status_var.set("Fetching/Indexing Jira issues..."))
-            self.vectors, self.metadata = duplicate.build_or_load_index(cfg, self.model)
+            self.root.after(0, lambda: self._set_status("Preparing index..."))
+            self.vectors, self.metadata = duplicate.build_or_load_index(
+                cfg,
+                self.model,
+                progress_callback=progress_callback,
+            )
             last_fetch = duplicate.get_cache_last_fetch()
             self.root.after(0, lambda ts=last_fetch: self._update_last_fetch_label(ts))
             self.root.after(0, self._sync_force_refresh_state)
 
-            self.root.after(0, lambda: self.status_var.set("Comparing issues..."))
+            self.root.after(0, lambda: self._start_spinner("Comparing issues"))
             results = duplicate.rank_similar(
                 model=self.model,
                 vectors=self.vectors,
@@ -260,12 +313,15 @@ class JiraDuplicateGUI:
                 min_score=cfg.min_score,
                 include_done=self.include_done_issues.get()
             )
+            self.root.after(0, self._stop_spinner)
 
             self.root.after(0, lambda: self._display_results(results))
         except Exception as e:
+            self.root.after(0, self._stop_spinner)
             self.root.after(0, lambda: messagebox.showerror("Error", str(e)))
-            self.root.after(0, lambda: self.status_var.set("Error occurred"))
+            self.root.after(0, lambda: self._set_status("Error occurred"))
         finally:
+            self.root.after(0, self._stop_spinner)
             self.root.after(0, lambda: self.check_btn.state(['!disabled']))
 
     def _display_results(self, results):
