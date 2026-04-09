@@ -13,8 +13,8 @@ class JiraDuplicateGUI:
     def __init__(self, root):
         self.root = root
         self.root.title("Jira Duplicate Finder")
-        self.root.geometry("800x700")
-        self.root.minsize(600, 500)
+        self.root.geometry("1200x760")
+        self.root.minsize(980, 620)
 
         # Config paths
         self.env_path = Path(".env")
@@ -24,7 +24,6 @@ class JiraDuplicateGUI:
         self.jira_url = tk.StringVar(value=os.getenv("JIRA_URL", ""))
         self.jira_token = tk.StringVar(value=os.getenv("JIRA_TOKEN", ""))
         self.jira_project = tk.StringVar(value=os.getenv("JIRA_PROJECT_KEY", ""))
-        self.jira_user = tk.StringVar(value=os.getenv("JIRA_USER", ""))
         self.title_var = tk.StringVar()
         self.status_var = tk.StringVar(value="Ready")
         self.force_refresh_cache = tk.BooleanVar(value=False)
@@ -48,48 +47,53 @@ class JiraDuplicateGUI:
         main_frame = ttk.Frame(self.root, padding="10")
         main_frame.pack(fill=tk.BOTH, expand=True)
 
+        # Split view: compact controls on the left, wide results on the right.
+        content_pane = ttk.Panedwindow(main_frame, orient=tk.HORIZONTAL)
+        content_pane.pack(fill=tk.BOTH, expand=True)
+
+        left_panel = ttk.Frame(content_pane)
+        right_panel = ttk.Frame(content_pane)
+        content_pane.add(left_panel, weight=1)
+        content_pane.add(right_panel, weight=2)
+
         # --- Connection Settings ---
-        settings_frame = ttk.LabelFrame(main_frame, text="Jira Connection", padding="10")
+        settings_frame = ttk.LabelFrame(left_panel, text="Jira Connection", padding="10")
         settings_frame.pack(fill=tk.X, pady=(0, 10))
 
         # URL
         ttk.Label(settings_frame, text="Jira URL:").grid(row=0, column=0, sticky=tk.W, padx=5, pady=2)
-        ttk.Entry(settings_frame, textvariable=self.jira_url).grid(row=0, column=1, sticky=tk.EW, padx=5, pady=2)
+        ttk.Entry(settings_frame, textvariable=self.jira_url).grid(row=1, column=0, sticky=tk.EW, padx=5, pady=2)
         
         # Project Key
-        ttk.Label(settings_frame, text="Project Key:").grid(row=0, column=2, sticky=tk.W, padx=5, pady=2)
-        ttk.Entry(settings_frame, textvariable=self.jira_project).grid(row=0, column=3, sticky=tk.EW, padx=5, pady=2)
+        ttk.Label(settings_frame, text="Project Key:").grid(row=2, column=0, sticky=tk.W, padx=5, pady=2)
+        ttk.Entry(settings_frame, textvariable=self.jira_project).grid(row=3, column=0, sticky=tk.EW, padx=5, pady=2)
 
         # Token
-        ttk.Label(settings_frame, text="Token / PAT:").grid(row=1, column=0, sticky=tk.W, padx=5, pady=2)
+        ttk.Label(settings_frame, text="Token / PAT:").grid(row=4, column=0, sticky=tk.W, padx=5, pady=2)
         self.token_entry = ttk.Entry(settings_frame, textvariable=self.jira_token, show="*")
-        self.token_entry.grid(row=1, column=1, sticky=tk.EW, padx=5, pady=2)
+        self.token_entry.grid(row=5, column=0, sticky=tk.EW, padx=5, pady=2)
 
-        # User (optional)
-        ttk.Label(settings_frame, text="User (optional):").grid(row=1, column=2, sticky=tk.W, padx=5, pady=2)
-        ttk.Entry(settings_frame, textvariable=self.jira_user).grid(row=1, column=3, sticky=tk.EW, padx=5, pady=2)
-
-        settings_frame.columnconfigure(1, weight=1)
-        settings_frame.columnconfigure(3, weight=1)
+        settings_frame.columnconfigure(0, weight=1)
 
         # Save settings button
-        ttk.Button(settings_frame, text="Save Settings", command=self._save_settings).grid(row=2, column=0, columnspan=4, pady=5)
+        ttk.Button(settings_frame, text="Save Settings", command=self._save_settings).grid(row=6, column=0, sticky=tk.EW, pady=(8, 2))
 
         # --- Issue Input ---
-        input_frame = ttk.LabelFrame(main_frame, text="New Issue Details", padding="10")
+        input_frame = ttk.LabelFrame(left_panel, text="New Issue Details", padding="10")
         input_frame.pack(fill=tk.BOTH, expand=False, pady=(0, 10))
 
         ttk.Label(input_frame, text="Title:").pack(fill=tk.X)
         ttk.Entry(input_frame, textvariable=self.title_var).pack(fill=tk.X, pady=(0, 5))
 
         ttk.Label(input_frame, text="Description:").pack(fill=tk.X)
-        self.desc_text = tk.Text(input_frame, height=8, font=("TkDefaultFont", 10))
+        self.desc_text = tk.Text(input_frame, height=6, font=("TkDefaultFont", 10))
         self.desc_text.pack(fill=tk.BOTH, expand=True)
 
         # --- Actions ---
-        btn_frame = ttk.Frame(main_frame)
+        btn_frame = ttk.Frame(left_panel)
         btn_frame.pack(fill=tk.X, pady=(0, 10))
 
+        btn_frame.columnconfigure(0, weight=1)
         btn_frame.columnconfigure(1, weight=1)
 
         self.force_refresh_check = ttk.Checkbutton(
@@ -99,6 +103,13 @@ class JiraDuplicateGUI:
         )
         self.force_refresh_check.grid(row=0, column=0, sticky=tk.W, pady=(0, 4))
 
+        ttk.Label(
+            btn_frame,
+            textvariable=self.last_fetch_var,
+            font=("TkDefaultFont", 9),
+            foreground="#334155"
+        ).grid(row=0, column=1, sticky=tk.W, padx=(12, 0), pady=(0, 4))
+
         ttk.Checkbutton(
             btn_frame,
             text="Include closed (done) issues in results",
@@ -106,19 +117,19 @@ class JiraDuplicateGUI:
         ).grid(row=1, column=0, sticky=tk.W, pady=(0, 6))
 
         self.check_btn = ttk.Button(btn_frame, text="Check for Duplicates", command=self._start_check)
-        self.check_btn.grid(row=2, column=0, sticky=tk.W)
+        self.check_btn.grid(row=2, column=0, sticky=tk.EW)
 
         ttk.Label(
             btn_frame,
             text="Warning: This will remove the cached index\nand force a complete refresh on next search,\nwhich may take significantly longer.",
             foreground="#b45309"
-        ).grid(row=0, column=1, sticky=tk.W, padx=(12, 0))
+        ).grid(row=2, column=1, sticky=tk.W, padx=(12, 0))
 
         ttk.Label(
             btn_frame,
             text="Done issues are always fetched for consistency.\nThis toggle only filters the displayed results.",
             foreground="#475569"
-        ).grid(row=1, column=1, sticky=tk.W, padx=(12, 0))
+        ).grid(row=1, column=1, sticky=tk.W, padx=(12, 0), pady=(0, 6))
         
         ttk.Label(btn_frame, textvariable=self.status_var, font=("TkDefaultFont", 9, "italic")).grid(
             row=3,
@@ -128,10 +139,8 @@ class JiraDuplicateGUI:
             pady=(8, 0)
         )
 
-        ttk.Label(main_frame, textvariable=self.last_fetch_var, font=("TkDefaultFont", 9)).pack(fill=tk.X, pady=(0, 10))
-
         # --- Results ---
-        results_frame = ttk.LabelFrame(main_frame, text="Similar Issues Found", padding="10")
+        results_frame = ttk.LabelFrame(right_panel, text="Similar Issues Found", padding="10")
         results_frame.pack(fill=tk.BOTH, expand=True)
 
         # Scrollable list for results
@@ -146,7 +155,12 @@ class JiraDuplicateGUI:
             )
         )
 
-        self.results_canvas.create_window((0, 0), window=self.results_scrollable_frame, anchor="nw")
+        self.results_canvas.bind(
+            "<Configure>",
+            lambda e: self.results_canvas.itemconfigure(self._results_window, width=e.width)
+        )
+
+        self._results_window = self.results_canvas.create_window((0, 0), window=self.results_scrollable_frame, anchor="nw")
         self.results_canvas.configure(yscrollcommand=self.scrollbar.set)
 
         self.results_canvas.pack(side="left", fill="both", expand=True)
@@ -161,7 +175,6 @@ class JiraDuplicateGUI:
             set_key(str(self.env_path), "JIRA_URL", self.jira_url.get())
             set_key(str(self.env_path), "JIRA_TOKEN", self.jira_token.get())
             set_key(str(self.env_path), "JIRA_PROJECT_KEY", self.jira_project.get())
-            set_key(str(self.env_path), "JIRA_USER", self.jira_user.get())
             self.status_var.set("Settings saved to .env")
         except Exception as e:
             messagebox.showerror("Error", f"Could not save settings: {e}")
@@ -275,7 +288,7 @@ class JiraDuplicateGUI:
                 jira_url=self.jira_url.get(),
                 jira_token=self.jira_token.get(),
                 jira_project_key=self.jira_project.get(),
-                jira_user=self.jira_user.get() if self.jira_user.get() else None,
+                jira_user=None,
                 model_name=duplicate.DEFAULT_MODEL,
                 top_k=5,
                 min_score=0.4, # More lenient for UI
@@ -331,6 +344,7 @@ class JiraDuplicateGUI:
             return
 
         self.status_var.set(f"Search complete - Found {len(results)} potential duplicates")
+        summary_wrap = max(520, self.results_canvas.winfo_width() - 80)
 
         for item in results:
             frame = ttk.Frame(self.results_scrollable_frame, padding=5)
@@ -346,7 +360,7 @@ class JiraDuplicateGUI:
             link.bind("<Button-1>", lambda e, url=item['url']: webbrowser.open_new(url))
 
             # Summary
-            ttk.Label(frame, text=item['summary'], wraplength=700).pack(anchor=tk.W, padx=10)
+            ttk.Label(frame, text=item['summary'], wraplength=summary_wrap, justify=tk.LEFT).pack(anchor=tk.W, padx=10)
             
             # Metadata
             meta_text = f"Status: {item['status']} | Type: {item['issue_type']} | Updated: {item['updated']}"
