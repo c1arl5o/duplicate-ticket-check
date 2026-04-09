@@ -28,13 +28,16 @@ class JiraDuplicateGUI:
         self.title_var = tk.StringVar()
         self.status_var = tk.StringVar(value="Ready")
         self.force_refresh_cache = tk.BooleanVar(value=False)
+        self.include_done_issues = tk.BooleanVar(value=False)
         self.last_fetch_var = tk.StringVar(value="Last fetch: never")
+        self._auto_forced_refresh = False
         
         self.model = None
         self.vectors = None
         self.metadata = None
         
         self._setup_ui()
+        self._sync_force_refresh_state()
         self._update_last_fetch_label()
 
     def _setup_ui(self):
@@ -84,22 +87,49 @@ class JiraDuplicateGUI:
         btn_frame = ttk.Frame(main_frame)
         btn_frame.pack(fill=tk.X, pady=(0, 10))
 
-        self.check_btn = ttk.Button(btn_frame, text="Check for Duplicates", command=self._start_check)
-        self.check_btn.pack(side=tk.LEFT, padx=5)
+        btn_frame.columnconfigure(1, weight=1)
 
-        ttk.Checkbutton(
-            btn_frame,
+        controls_frame = ttk.Frame(btn_frame)
+        controls_frame.grid(row=0, column=0, sticky=tk.NW)
+
+        helper_frame = ttk.Frame(btn_frame)
+        helper_frame.grid(row=0, column=1, sticky=tk.NW, padx=(12, 0))
+
+        self.force_refresh_check = ttk.Checkbutton(
+            controls_frame,
             text="Force refresh cache",
             variable=self.force_refresh_cache
-        ).pack(side=tk.LEFT, padx=(5, 0))
+        )
+        self.force_refresh_check.pack(anchor=tk.W, pady=(0, 4))
+
+        ttk.Checkbutton(
+            controls_frame,
+            text="Include closed (done) issues in results",
+            variable=self.include_done_issues
+        ).pack(anchor=tk.W, pady=(0, 6))
+
+        self.check_btn = ttk.Button(controls_frame, text="Check for Duplicates", command=self._start_check)
+        self.check_btn.pack(anchor=tk.W)
 
         ttk.Label(
-            btn_frame,
-            text="Warning: This can take some time!",
+            helper_frame,
+            text="Warning: Fetching can take some time.",
             foreground="#b45309"
-        ).pack(side=tk.LEFT, padx=(8, 0))
+        ).pack(anchor=tk.W)
+
+        ttk.Label(
+            helper_frame,
+            text="Done issues are always fetched for consistency.\nThis toggle only filters the displayed results.",
+            foreground="#475569"
+        ).pack(anchor=tk.W, pady=(4, 0))
         
-        ttk.Label(btn_frame, textvariable=self.status_var, font=("TkDefaultFont", 9, "italic")).pack(side=tk.LEFT, padx=10)
+        ttk.Label(btn_frame, textvariable=self.status_var, font=("TkDefaultFont", 9, "italic")).grid(
+            row=1,
+            column=0,
+            columnspan=2,
+            sticky=tk.W,
+            pady=(8, 0)
+        )
 
         ttk.Label(main_frame, textvariable=self.last_fetch_var, font=("TkDefaultFont", 9)).pack(fill=tk.X, pady=(0, 10))
 
@@ -178,6 +208,19 @@ class JiraDuplicateGUI:
             timestamp = duplicate.get_cache_last_fetch()
         self.last_fetch_var.set(self._format_fetch_timestamp(timestamp))
 
+    def _sync_force_refresh_state(self):
+        cache_exists = duplicate.CACHE_FILE.exists()
+
+        if not cache_exists:
+            self.force_refresh_cache.set(True)
+            self._auto_forced_refresh = True
+            self.force_refresh_check.state(["disabled"])
+        else:
+            self.force_refresh_check.state(["!disabled"])
+            if self._auto_forced_refresh:
+                self.force_refresh_cache.set(False)
+                self._auto_forced_refresh = False
+
     def _perform_check(self, title, description):
         try:
             cfg = duplicate.Config(
@@ -190,7 +233,7 @@ class JiraDuplicateGUI:
                 min_score=0.4, # More lenient for UI
                 refresh_cache=self.force_refresh_cache.get(),
                 build_only=False,
-                exclude_done=True,
+                exclude_done=False,
                 issue_file="",
                 title=title,
                 description=description
@@ -204,6 +247,7 @@ class JiraDuplicateGUI:
             self.vectors, self.metadata = duplicate.build_or_load_index(cfg, self.model)
             last_fetch = duplicate.get_cache_last_fetch()
             self.root.after(0, lambda ts=last_fetch: self._update_last_fetch_label(ts))
+            self.root.after(0, self._sync_force_refresh_state)
 
             self.root.after(0, lambda: self.status_var.set("Comparing issues..."))
             results = duplicate.rank_similar(
@@ -213,7 +257,8 @@ class JiraDuplicateGUI:
                 title=title,
                 description=description,
                 top_k=5,
-                min_score=cfg.min_score
+                min_score=cfg.min_score,
+                include_done=self.include_done_issues.get()
             )
 
             self.root.after(0, lambda: self._display_results(results))

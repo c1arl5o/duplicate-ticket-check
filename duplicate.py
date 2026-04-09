@@ -18,6 +18,7 @@ from sklearn.metrics.pairwise import cosine_similarity
 
 CACHE_DIR = Path(".cache")
 CACHE_FILE = CACHE_DIR / "issue_index.pkl"
+CACHE_SCHEMA_VERSION = 2
 DEFAULT_MODEL = "sentence-transformers/all-mpnet-base-v2"
 DEFAULT_TOP_K = 5
 DEFAULT_THRESHOLD = 0.55
@@ -109,14 +110,12 @@ def adf_to_text(node: Any) -> str:
 	return ""
 
 
-def build_jql(project_key: str, exclude_done: bool) -> str:
+def build_jql(project_key: str) -> str:
 	base = (
 		f'project = "{project_key}" '
 		"AND issuetype in (Epic, Story, Bug, Task) "
 		'AND issuetype not in ("Test Execution")'
 	)
-	if exclude_done:
-		base += " AND statusCategory != Done"
 	return base
 
 
@@ -157,7 +156,7 @@ def call_jira_search(
 
 def fetch_issues(cfg: Config) -> list[dict[str, Any]]:
 	headers, auth = get_auth_headers_and_params(cfg.jira_token, cfg.jira_user)
-	jql = build_jql(cfg.jira_project_key, cfg.exclude_done)
+	jql = build_jql(cfg.jira_project_key)
 
 	fields = ["key", "summary", "description", "issuetype", "status", "updated"]
 	start_at = 0
@@ -182,7 +181,9 @@ def fetch_issues(cfg: Config) -> list[dict[str, Any]]:
 			description_text = normalize_text(adf_to_text(fields_data.get("description")))
 			text_for_embedding = normalize_text(f"{summary}. {description_text}")
 			issue_type = (fields_data.get("issuetype") or {}).get("name", "")
-			status = (fields_data.get("status") or {}).get("name", "")
+			status_data = fields_data.get("status") or {}
+			status = status_data.get("name", "")
+			status_category = (status_data.get("statusCategory") or {}).get("name", "")
 			updated = fields_data.get("updated", "")
 
 			if not summary:
@@ -196,6 +197,7 @@ def fetch_issues(cfg: Config) -> list[dict[str, Any]]:
 					"text": text_for_embedding,
 					"issue_type": issue_type,
 					"status": status,
+					"status_category": status_category,
 					"updated": updated,
 					"url": issue_url(cfg.jira_url, key),
 				}
@@ -229,7 +231,12 @@ def save_cache(payload: dict[str, Any]) -> None:
 def build_or_load_index(cfg: Config, model: SentenceTransformer) -> tuple[np.ndarray, list[dict[str, Any]]]:
 	cache = load_cache()
 	if cache and not cfg.refresh_cache:
-		if cache.get("model_name") == cfg.model_name and cache.get("project_key") == cfg.jira_project_key:
+		if (
+			cache.get("model_name") == cfg.model_name
+			and cache.get("project_key") == cfg.jira_project_key
+			and cache.get("schema_version") == CACHE_SCHEMA_VERSION
+			and cache.get("includes_done_issues") is True
+		):
 			vectors = cache.get("vectors")
 			metadata = cache.get("metadata")
 			if isinstance(vectors, np.ndarray) and isinstance(metadata, list) and len(metadata) == len(vectors):
@@ -245,6 +252,8 @@ def build_or_load_index(cfg: Config, model: SentenceTransformer) -> tuple[np.nda
 
 	save_cache(
 		{
+			"schema_version": CACHE_SCHEMA_VERSION,
+			"includes_done_issues": True,
 			"model_name": cfg.model_name,
 			"project_key": cfg.jira_project_key,
 			"fetched_at": fetched_at,
@@ -278,6 +287,16 @@ def to_confidence(score: float) -> str:
 	return "low"
 
 
+def is_done_issue(issue: dict[str, Any]) -> bool:
+	category = str(issue.get("status_category", "")).strip().lower()
+	if category:
+		return category == "done"
+
+	# Backward-compatible heuristic for old metadata entries that don't carry status_category.
+	status = str(issue.get("status", "")).strip().lower()
+	return status in {"done", "closed", "resolved", "complete", "completed"}
+
+
 def rank_similar(
 	model: SentenceTransformer,
 	vectors: np.ndarray,
@@ -286,6 +305,7 @@ def rank_similar(
 	description: str,
 	top_k: int,
 	min_score: float,
+	include_done: bool = True,
 ) -> list[dict[str, Any]]:
 	candidate_text = normalize_text(f"{title}. {title}. {description}")
 	if not candidate_text.strip(". "):
@@ -301,6 +321,8 @@ def rank_similar(
 		if score < min_score:
 			continue
 		issue = metadata[idx]
+		if not include_done and is_done_issue(issue):
+			continue
 		results.append(
 			{
 				"key": issue["key"],
@@ -419,6 +441,7 @@ def main() -> int:
 			description=cfg.description,
 			top_k=cfg.top_k,
 			min_score=cfg.min_score,
+			include_done=not cfg.exclude_done,
 		)
 		print_results(results)
 		return 0
