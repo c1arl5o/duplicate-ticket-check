@@ -61,22 +61,28 @@ class JiraDuplicateGUI:
         settings_frame.pack(fill=tk.X, pady=(0, 10))
 
         # URL
-        ttk.Label(settings_frame, text="Jira URL:").grid(row=0, column=0, sticky=tk.W, padx=5, pady=2)
-        ttk.Entry(settings_frame, textvariable=self.jira_url).grid(row=1, column=0, sticky=tk.EW, padx=5, pady=2)
+        ttk.Label(settings_frame, text="Jira URL:").grid(row=0, column=0, sticky=tk.W, padx=(5, 8), pady=3)
+        ttk.Entry(settings_frame, textvariable=self.jira_url, width=48).grid(row=0, column=1, sticky=tk.W, padx=5, pady=3)
         
         # Project Key
-        ttk.Label(settings_frame, text="Project Key:").grid(row=2, column=0, sticky=tk.W, padx=5, pady=2)
-        ttk.Entry(settings_frame, textvariable=self.jira_project).grid(row=3, column=0, sticky=tk.EW, padx=5, pady=2)
+        ttk.Label(settings_frame, text="Project Key:").grid(row=1, column=0, sticky=tk.W, padx=(5, 8), pady=3)
+        ttk.Entry(settings_frame, textvariable=self.jira_project, width=18).grid(row=1, column=1, sticky=tk.W, padx=5, pady=3)
 
         # Token
-        ttk.Label(settings_frame, text="Token / PAT:").grid(row=4, column=0, sticky=tk.W, padx=5, pady=2)
-        self.token_entry = ttk.Entry(settings_frame, textvariable=self.jira_token, show="*")
-        self.token_entry.grid(row=5, column=0, sticky=tk.EW, padx=5, pady=2)
+        ttk.Label(settings_frame, text="Token / PAT:").grid(row=2, column=0, sticky=tk.W, padx=(5, 8), pady=3)
+        self.token_entry = ttk.Entry(settings_frame, textvariable=self.jira_token, show="*", width=48)
+        self.token_entry.grid(row=2, column=1, sticky=tk.W, padx=5, pady=3)
 
-        settings_frame.columnconfigure(0, weight=1)
+        settings_frame.columnconfigure(1, weight=1)
 
         # Save settings button
-        ttk.Button(settings_frame, text="Save Settings", command=self._save_settings).grid(row=6, column=0, sticky=tk.EW, pady=(8, 2))
+        ttk.Button(settings_frame, text="Save Settings", command=self._save_settings).grid(
+            row=3,
+            column=0,
+            columnspan=2,
+            sticky=tk.EW,
+            pady=(8, 2)
+        )
 
         # --- Issue Input ---
         input_frame = ttk.LabelFrame(left_panel, text="New Issue Details", padding="10")
@@ -86,7 +92,7 @@ class JiraDuplicateGUI:
         ttk.Entry(input_frame, textvariable=self.title_var).pack(fill=tk.X, pady=(0, 5))
 
         ttk.Label(input_frame, text="Description:").pack(fill=tk.X)
-        self.desc_text = tk.Text(input_frame, height=6, font=("TkDefaultFont", 10))
+        self.desc_text = tk.Text(input_frame, height=16, font=("TkDefaultFont", 10))
         self.desc_text.pack(fill=tk.BOTH, expand=True)
 
         # --- Actions ---
@@ -106,33 +112,34 @@ class JiraDuplicateGUI:
         ttk.Label(
             btn_frame,
             textvariable=self.last_fetch_var,
-            font=("TkDefaultFont", 9),
+            font=("TkDefaultFont", 8),
             foreground="#334155"
-        ).grid(row=0, column=1, sticky=tk.W, padx=(12, 0), pady=(0, 4))
+        ).grid(row=1, column=0, sticky=tk.W, padx=(24, 0), pady=(0, 8))
+
+        ttk.Separator(btn_frame, orient="horizontal").grid(row=2, column=0, columnspan=2, sticky=tk.EW, pady=(2, 8))
 
         ttk.Checkbutton(
             btn_frame,
             text="Include closed (done) issues in results",
             variable=self.include_done_issues
-        ).grid(row=1, column=0, sticky=tk.W, pady=(0, 6))
+        ).grid(row=3, column=0, sticky=tk.W, pady=(0, 6))
 
         self.check_btn = ttk.Button(btn_frame, text="Check for Duplicates", command=self._start_check)
-        self.check_btn.grid(row=2, column=0, sticky=tk.EW)
+        self.check_btn.grid(row=5, column=0, sticky=tk.EW, pady=(6, 0))
+
+        ttk.Separator(btn_frame, orient="horizontal").grid(row=4, column=0, columnspan=2, sticky=tk.EW, pady=(2, 6))
 
         ttk.Label(
             btn_frame,
             text="Warning: This will remove the cached index\nand force a complete refresh on next search,\nwhich may take significantly longer.",
-            foreground="#b45309"
-        ).grid(row=2, column=1, sticky=tk.W, padx=(12, 0))
+            foreground="#b45309",
+            justify=tk.LEFT,
+            wraplength=370,
+            anchor="w"
+        ).grid(row=0, column=1, rowspan=3, sticky=tk.NW, padx=(14, 0), pady=(0, 2))
 
-        ttk.Label(
-            btn_frame,
-            text="Done issues are always fetched for consistency.\nThis toggle only filters the displayed results.",
-            foreground="#475569"
-        ).grid(row=1, column=1, sticky=tk.W, padx=(12, 0), pady=(0, 6))
-        
         ttk.Label(btn_frame, textvariable=self.status_var, font=("TkDefaultFont", 9, "italic")).grid(
-            row=3,
+            row=6,
             column=0,
             columnspan=2,
             sticky=tk.W,
