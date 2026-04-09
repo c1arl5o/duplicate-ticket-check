@@ -4,6 +4,7 @@ import os
 import pickle
 import re
 import sys
+from datetime import datetime, timezone
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -240,17 +241,33 @@ def build_or_load_index(cfg: Config, model: SentenceTransformer) -> tuple[np.nda
 
 	texts = [item["text"] for item in issues]
 	vectors = embed_texts(model, texts)
+	fetched_at = datetime.now(timezone.utc).isoformat()
 
 	save_cache(
 		{
 			"model_name": cfg.model_name,
 			"project_key": cfg.jira_project_key,
+			"fetched_at": fetched_at,
 			"vectors": vectors,
 			"metadata": issues,
 		}
 	)
 
 	return vectors, issues
+
+
+def get_cache_last_fetch() -> str | None:
+	cache = load_cache()
+	if cache:
+		fetched_at = cache.get("fetched_at")
+		if isinstance(fetched_at, str) and fetched_at.strip():
+			return fetched_at
+
+	if CACHE_FILE.exists():
+		# Backward compatibility for old cache files without fetched_at.
+		return datetime.fromtimestamp(CACHE_FILE.stat().st_mtime, tz=timezone.utc).isoformat()
+
+	return None
 
 
 def to_confidence(score: float) -> str:

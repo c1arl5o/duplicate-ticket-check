@@ -2,6 +2,7 @@ import os
 import threading
 import webbrowser
 import tkinter as tk
+from datetime import datetime
 from tkinter import ttk, messagebox
 from pathlib import Path
 from dotenv import load_dotenv, set_key
@@ -26,12 +27,15 @@ class JiraDuplicateGUI:
         self.jira_user = tk.StringVar(value=os.getenv("JIRA_USER", ""))
         self.title_var = tk.StringVar()
         self.status_var = tk.StringVar(value="Ready")
+        self.force_refresh_cache = tk.BooleanVar(value=False)
+        self.last_fetch_var = tk.StringVar(value="Last fetch: never")
         
         self.model = None
         self.vectors = None
         self.metadata = None
         
         self._setup_ui()
+        self._update_last_fetch_label()
 
     def _setup_ui(self):
         # Main container with padding
@@ -82,8 +86,22 @@ class JiraDuplicateGUI:
 
         self.check_btn = ttk.Button(btn_frame, text="Check for Duplicates", command=self._start_check)
         self.check_btn.pack(side=tk.LEFT, padx=5)
+
+        ttk.Checkbutton(
+            btn_frame,
+            text="Force refresh cache",
+            variable=self.force_refresh_cache
+        ).pack(side=tk.LEFT, padx=(5, 0))
+
+        ttk.Label(
+            btn_frame,
+            text="Warning: This can take some time!",
+            foreground="#b45309"
+        ).pack(side=tk.LEFT, padx=(8, 0))
         
         ttk.Label(btn_frame, textvariable=self.status_var, font=("TkDefaultFont", 9, "italic")).pack(side=tk.LEFT, padx=10)
+
+        ttk.Label(main_frame, textvariable=self.last_fetch_var, font=("TkDefaultFont", 9)).pack(fill=tk.X, pady=(0, 10))
 
         # --- Results ---
         results_frame = ttk.LabelFrame(main_frame, text="Similar Issues Found", padding="10")
@@ -144,6 +162,22 @@ class JiraDuplicateGUI:
         # Run in thread
         threading.Thread(target=self._perform_check, args=(title, description), daemon=True).start()
 
+    def _format_fetch_timestamp(self, timestamp: str | None) -> str:
+        if not timestamp:
+            return "Last fetch: never"
+
+        try:
+            parsed = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+            local_dt = parsed.astimezone()
+            return f"Last fetch: {local_dt.strftime('%Y-%m-%d %H:%M:%S %Z')}"
+        except Exception:
+            return "Last fetch: unknown"
+
+    def _update_last_fetch_label(self, timestamp: str | None = None):
+        if timestamp is None:
+            timestamp = duplicate.get_cache_last_fetch()
+        self.last_fetch_var.set(self._format_fetch_timestamp(timestamp))
+
     def _perform_check(self, title, description):
         try:
             cfg = duplicate.Config(
@@ -154,7 +188,7 @@ class JiraDuplicateGUI:
                 model_name=duplicate.DEFAULT_MODEL,
                 top_k=5,
                 min_score=0.4, # More lenient for UI
-                refresh_cache=False,
+                refresh_cache=self.force_refresh_cache.get(),
                 build_only=False,
                 exclude_done=True,
                 issue_file="",
@@ -168,6 +202,8 @@ class JiraDuplicateGUI:
             
             self.root.after(0, lambda: self.status_var.set("Fetching/Indexing Jira issues..."))
             self.vectors, self.metadata = duplicate.build_or_load_index(cfg, self.model)
+            last_fetch = duplicate.get_cache_last_fetch()
+            self.root.after(0, lambda ts=last_fetch: self._update_last_fetch_label(ts))
 
             self.root.after(0, lambda: self.status_var.set("Comparing issues..."))
             results = duplicate.rank_similar(
