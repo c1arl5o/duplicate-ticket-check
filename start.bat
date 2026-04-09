@@ -49,19 +49,33 @@ if %ERRORLEVEL% NEQ 0 (
   exit /b 1
 )
 
-echo Installing dependencies...
-python -m pip install --upgrade pip
-if %ERRORLEVEL% NEQ 0 (
-  echo pip upgrade failed.
-  pause
-  exit /b 1
+set "REQ_LOCK=.venv\requirements.lock"
+set "NEEDS_INSTALL=1"
+
+if exist "%REQ_LOCK%" (
+  fc /b "%REQ_LOCK%" "requirements.txt" >nul
+  if not errorlevel 1 set "NEEDS_INSTALL=0"
 )
 
-python -m pip install -r requirements.txt
-if %ERRORLEVEL% NEQ 0 (
-  echo Dependency installation failed.
-  pause
-  exit /b 1
+if "%NEEDS_INSTALL%"=="1" (
+  echo Installing dependencies...
+  python -m pip install --upgrade pip
+  if %ERRORLEVEL% NEQ 0 (
+    echo pip upgrade failed.
+    pause
+    exit /b 1
+  )
+
+  python -m pip install -r requirements.txt
+  if %ERRORLEVEL% NEQ 0 (
+    echo Dependency installation failed.
+    pause
+    exit /b 1
+  )
+
+  copy /y requirements.txt "%REQ_LOCK%" >nul
+) else (
+  echo Dependencies already installed.
 )
 
 echo Launching Jira Duplicate Finder...
