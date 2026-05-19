@@ -59,20 +59,11 @@ if exist "%REQ_LOCK%" (
 
 if "%NEEDS_INSTALL%"=="1" (
   echo Installing dependencies...
-  python -m pip install --upgrade pip
+  call :install_deps
   if %ERRORLEVEL% NEQ 0 (
-    echo pip upgrade failed.
     pause
     exit /b 1
   )
-
-  python -m pip install -r requirements.txt
-  if %ERRORLEVEL% NEQ 0 (
-    echo Dependency installation failed.
-    pause
-    exit /b 1
-  )
-
   copy /y requirements.txt "%REQ_LOCK%" >nul
 ) else (
   echo Dependencies already installed.
@@ -89,3 +80,20 @@ if %EXIT_CODE% NEQ 0 (
 )
 
 exit /b %EXIT_CODE%
+
+:install_deps
+python -m pip install --upgrade pip -q
+python -m pip install -r requirements.txt
+if %ERRORLEVEL% EQU 0 exit /b 0
+
+echo.
+echo Direct connection to pypi.org failed. Retrying via corporate proxy...
+python -m pip install --upgrade pip -q --proxy http://sia-lb.telekom.de:8080
+python -m pip install -r requirements.txt --proxy http://sia-lb.telekom.de:8080
+if %ERRORLEVEL% EQU 0 exit /b 0
+
+echo.
+echo ERROR: Could not install required packages.
+echo        pypi.org could not be reached directly or via the corporate proxy.
+echo        Please try from a different network or contact your IT department.
+exit /b 1
