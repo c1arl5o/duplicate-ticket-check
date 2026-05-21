@@ -2,6 +2,7 @@
 setlocal EnableExtensions
 cd /d "%~dp0"
 
+set "USE_PROXY=0"
 set "PY_CMD="
 where py >nul 2>&1 && set "PY_CMD=py -3"
 if not defined PY_CMD (
@@ -69,6 +70,11 @@ if "%NEEDS_INSTALL%"=="1" (
   echo Dependencies already installed.
 )
 
+if "%USE_PROXY%"=="1" (
+  set "HTTP_PROXY=http://sia-lb.telekom.de:8080"
+  set "HTTPS_PROXY=http://sia-lb.telekom.de:8080"
+)
+
 echo Launching Jira Duplicate Finder...
 python gui.py
 set "EXIT_CODE=%ERRORLEVEL%"
@@ -90,7 +96,10 @@ echo.
 echo Direct connection to pypi.org failed. Retrying via corporate proxy...
 python -m pip install --upgrade pip -q --proxy http://sia-lb.telekom.de:8080
 python -m pip install -r requirements.txt --proxy http://sia-lb.telekom.de:8080
-if %ERRORLEVEL% EQU 0 exit /b 0
+if %ERRORLEVEL% EQU 0 (
+  set "USE_PROXY=1"
+  exit /b 0
+)
 
 echo.
 echo ERROR: Could not install required packages.
